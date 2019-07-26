@@ -1,0 +1,545 @@
+---
+title: "CSCI 6444: Project 2"
+author: "Tianyu Yang; Zhijun Xia"
+output: html_notebook
+---
+```{r}
+# Install and library packages
+#install.packages("tm")
+library(tm)
+#install.packages("quanteda")
+library(quanteda)
+#install.packages("tokenizer")
+library(tokenizers)
+#install.packages("data.table")
+library(data.table)
+#install.packages("wordcloud")
+library(wordcloud)
+#install.packages("corpustools")
+library(corpustools)
+#install.packages("stringi")
+library(stringi)
+#install.packages("zipfR")
+library(zipfR)
+#install.packages("rJava")
+library(rJava)
+#install.packages("wordnet")
+library(wordnet)
+require(tm)
+require(quanteda)
+require(tokenizers)
+```
+
+```{r}
+# Create a VCorpus
+
+# Set path
+#setwd("/Users/tianyuyang/Desktop/project2/CSCI6444_Project2")
+getwd()
+SAT<-VCorpus(DirSource(".", ignore.case=TRUE, mode="text"))
+SAT
+SATtxt <-SAT[[2]]$content
+SATtxt
+removeNumPunct <-function(x) gsub("[^[:alpha:][:space:]]*", "", x)
+```
+
+```{r}
+# Values preparation
+
+# Chunk txt into sentences
+chunk_into_sentences <- function(text) {
+  break_points <- c(1, as.numeric(gregexpr('[[:alnum:] ][.!?]', text)[[1]]) + 1)
+  sentences <- NULL
+  for(i in 1:length(break_points)) {
+    res <- substr(text, break_points[i], break_points[i+1]) 
+    if(i>1) { 
+      sentences[i] <- sub('. ', '', res)
+      # Remove useless punctuation
+      sentences[i] <- gsub("\n", "", sentences[i]) #new line
+      sentences[i] <- gsub("\", \"", " ", sentences[i]) #line ender
+      sentences[i] <- gsub(".\"\"", "", sentences[i]) #header
+      sentences[i] <- gsub("  ", "", sentences[i]) #space
+      sentences[i] <- gsub("_", "", sentences[i]) #underline
+      sentences[i] <- gsub("--", " ", sentences[i]) #connector
+      sentences[i] <- gsub("\\\\", "", sentences[i]) #slash
+      } else { sentences[i] <- res }
+    }
+  sentences <- sentences[sentences=!is.na(sentences)]
+  
+  # Remove chapter name
+  sentences <-removeWords(sentences,"c")
+  sentences <-removeWords(sentences,"Prpr")
+  sentences <-removeWords(sentences,"INTRODUCTION")
+  sentences <-removeWords(sentences,"DREAMS")
+  return(sentences)
+}
+
+# Another method to get sentences
+text <- NULL
+for(i in 1:length(SATtxt)){
+  text <-paste(text,SATtxt[i])
+}
+SATsentences<-tokenize_sentences(text)
+#SATsentences
+
+mycorpus <- VCorpus(VectorSource(SATtxt))
+
+corpus_frame <- data.frame(text=unlist(sapply(mycorpus, `[`, "content")), stringsAsFactors=F)
+sentences <-chunk_into_sentences(corpus_frame)
+sentences
+```
+
+```{r}
+# Chunk txt into paragraphs
+chunk_into_paragraphs <- function(text) {
+  break_points <- c(1, as.numeric(gregexpr("\"\"", text)[[1]]) + 1)
+  paragraphs <- NULL
+  for(i in 1:length(break_points)) {
+    res <- substr(text, break_points[i], break_points[i+1]) 
+    if(i>1) { paragraphs[i] <- sub('. ', '', res) } else { paragraphs[i] <- res }
+    }
+  paragraphs <- paragraphs[paragraphs=!is.na(paragraphs)]
+  removeInd <- NULL
+  for(i in 1:length(paragraphs)){
+    if(count_words(paragraphs[i])<7){
+      removeInd <-append(removeInd,i)
+    }
+    }
+  for(i in 1:length(removeInd)){
+    paragraphs <- paragraphs[-(removeInd[i]-i+1)]
+    }
+  return(paragraphs)
+}
+mycorpus <- VCorpus(VectorSource(SATtxt))
+
+corpus_frame <- data.frame(text=unlist(sapply(mycorpus, `[`, "content")), stringsAsFactors=F)
+paragraphs <-chunk_into_paragraphs(corpus_frame)
+
+paragraphs
+```
+
+```{r}
+# Project_2 1.(b)
+
+# Find longest sentences
+Find_longest_sentence <- function(text){
+  result<-NULL
+  wordCount <-NULL
+  for(i in 1:length(text)){
+    wordCount[i] = count_words(text[i])
+  }
+  max <-max(wordCount)
+  for(i in 1:length(wordCount)){
+    if(wordCount[i] == max)
+      index <-i
+  }
+  return(index)
+}
+
+# Find 10 longest sentences
+Find_sentences <- function(text,n){
+  result <- NULL
+  for(i in 1:n){
+    result <-append(result,text[Find_longest_sentence(text)])
+    text <-text[-Find_longest_sentence(text)]
+  }
+  return(result)
+}
+
+# Display result
+Find_sentences(sentences,10)
+```
+
+```{r}
+# Project_2 1.(c)
+require(wordcloud)
+Create_dendrogram <-function(corpus){
+  # Corpus Management
+  SATlow <- tm_map(corpus, content_transformer(tolower))
+  SATcl <- tm_map(SATlow,content_transformer(removeNumPunct))
+  myStopwords <- c(stopwords('english'))
+
+  # Removing stop words
+  SATstop <- tm_map(SATcl, removeWords, myStopwords)
+  
+  # Remove sparse terms
+  SATtdm2 <- TermDocumentMatrix(SATstop,control = list(wordlengths = c(1,Inf)))
+  
+  # Clustering Terms
+  distMatrix <-dist(scale(SATtdm2))
+  
+  ## Clustering Terms via Dendrogram
+  fit <-hclust(distMatrix,method = "ward.D2")
+  plot(fit)
+}
+Create_WordCloud <-function(corpus){
+  # Corpus Management
+  SATlow <- tm_map(SAT[2], content_transformer(tolower))
+  SATcl <- tm_map(SATlow,content_transformer(removeNumPunct))
+  myStopwords <- c(stopwords('english'))
+  
+  # Removing stop words
+  SATstop <- tm_map(SATcl, removeWords, myStopwords)
+  
+  # Remove sparse terms
+  SATtdm2 <- TermDocumentMatrix(SATstop,control = list(wordlengths = c(1,Inf)))
+  
+  ## Word Cloud
+  m1<- as.matrix(SATtdm2)
+  word.freq <-sort(rowSums(m1),decreasing = T)
+  pal <- brewer.pal(9,"BuGn")
+  pal <- pal[-(1:4)]
+  wordcloud(words = names(word.freq),freq = word.freq,min.freq = 3,random.order = F,colors = pal)
+}
+for(i in 1:length(paragraphs)){
+  corp <- Corpus(VectorSource(paragraphs[i]))
+  #Create_dendrogram(corp)
+}
+for(i in 1:length(paragraphs)){
+  corp <- Corpus(VectorSource(paragraphs[i]))
+  #Create_WordCloud(corp)
+}
+Create_dendrogram(Corpus(VectorSource(paragraphs[7])))
+Create_WordCloud(Corpus(VectorSource(paragraphs[7])))
+
+```
+
+```{r}
+# Project_2 1.(d)
+require(data.table)
+Find_shortest_sentence <- function(text){
+  result<-NULL
+  wordCount <-NULL
+  for(i in 1:length(text)){
+    wordCount[i] = count_words(text[i])
+  }
+  min <-min(wordCount)
+  for(i in 1:length(wordCount)){
+    if(wordCount[i] == min)
+      index <-i
+  }
+  return(index)
+}
+
+sentence <-chunk_into_sentences(paragraphs[1])
+#sentence
+
+Find_longest_sentence(sentence)
+sentence[Find_longest_sentence(sentence)]
+count_words(sentence[Find_longest_sentence(sentence)])
+
+Find_shortest_sentence(sentence)
+sentence[Find_shortest_sentence(sentence)]
+count_words(sentence[Find_shortest_sentence(sentence)])
+
+Find_longest_word <- function(text){
+  word <-tokenize_words(text)
+  charCount <- NULL
+  result <- NULL
+  
+  for(i in 1:length(word[[1]])){
+    charCount[i] = count_characters(word[[1]][i])
+  }
+  max <-max(charCount)
+  for(i in 1:length(charCount)){
+    if(charCount[i] == max){
+      result <-append(result,word[[1]][i])
+    }
+  }
+  return(toString(result))
+}
+Find_longest_word(paragraphs[1])
+
+dt<-data.table(paragraph_No = 1, length_of_shortest_sentence = count_words(sentence[Find_shortest_sentence(sentence)]),
+               length_of_longest_sentence = count_words(sentence[Find_longest_sentence(sentence)]),
+               longest_word = Find_longest_word(paragraphs[1]),longest_sentence = sentence[Find_longest_sentence(sentence)])
+for(i in 2:length(paragraphs)){
+  sentence <-chunk_into_sentences(paragraphs[i])
+  
+  dt1<-data.table(paragraph_No = i, length_of_shortest_sentence = count_words(sentence[Find_shortest_sentence(sentence)]),
+               length_of_longest_sentence = count_words(sentence[Find_longest_sentence(sentence)]),
+               longest_word = Find_longest_word(paragraphs[i]),longest_sentence = sentence[Find_longest_sentence(sentence)])
+  dt<-merge(dt, dt1, all = TRUE)
+}
+print(dt)
+```
+
+```{r}
+# Project_2 1.(e)
+require(rJava)
+require(wordnet)
+# wordnet testcase
+setDict("/Users/tianyuyang/Desktop/WordNet-3.0/dict")
+Sys.setenv(WNHOME = "/Users/tianyuyang/Desktop/WordNet-3.0/")
+
+if(initDict()) {
+  filter <- getTermFilter("ExactMatchFilter", "hot", TRUE)
+  terms <- getIndexTerms("ADJECTIVE", 5, filter)
+  synsets <- getSynsets(terms[[1]])
+  related <- getRelatedSynsets(synsets[[1]], "!")
+  sapply(related, getWord)
+  filter <- getTermFilter("StartsWithFilter", "car", TRUE)
+  terms <- getIndexTerms("NOUN", 5, filter)
+  sapply(terms, getLemma)
+}
+# Create text for the first five paragraphs
+firstFive_Paragraph <-NULL
+for(i in 1:5){
+  firstFive_Paragraph <-append(firstFive_Paragraph,paragraphs[i])
+}
+firstFive_Paragraph <-toString(firstFive_Paragraph)
+firstFive_Paragraph <-removeNumPunct(firstFive_Paragraph)
+#firstFive_Paragraph
+
+# Get words which its length no less than 5
+Five_words <-tokenize_words(firstFive_Paragraph)[[1]]
+#Five_words
+word_list<-NULL
+for(i in 1:length(Five_words)){
+  if(length(tokenize_characters(Five_words[i])[[1]])>=5){
+    word_list <-append(word_list,Five_words[i])
+  }
+}
+word_list
+
+verb_list<-NULL
+noun_list<-NULL
+for(i in 1:length(word_list)){
+  if(length(synonyms(word_list[i],"NOUN"))!=0){
+    noun_list <-append(noun_list,word_list[i])
+  }
+}
+for(i in 1:length(word_list)){
+  if(length(synonyms(word_list[i],"VERB"))!=0){
+    verb_list <-append(verb_list,word_list[i])
+  }
+}
+noun_list
+verb_list
+```
+
+```{r}
+# Project_2 1.(f)
+require(zipfR)
+# Corpus Management
+setwd("/Users/tianyuyang/Desktop/project2/CSCI6444_Project2")
+SAT<-VCorpus(DirSource(".", ignore.case=TRUE, mode="text"))
+SATlow <- tm_map(SAT[2], content_transformer(tolower))
+# Remove numbers, punctuation and stopwords
+SATcl <- tm_map(SATlow,content_transformer(removeNumPunct))
+myStopwords <- c(stopwords('english'))
+SATstop <- tm_map(SATcl, removeWords, myStopwords)
+
+SATtdm<-TermDocumentMatrix(SATstop, control = list(wordLengths = c(1,Inf)))
+
+# Term Frequency
+term.freq <-rowSums(as.matrix(SATtdm))
+# Frequency no less than 1
+term.freq <-subset(term.freq,term.freq>=1)
+df <-data.frame(term = names(term.freq), f = term.freq)
+setwd("/Users/tianyuyang/Desktop/project2/CSCI6444_Project2/word_frequency/")
+write.table(df, "word_frequency.txt", append = FALSE, sep = "\t",
+            row.names = FALSE, col.names = TRUE)
+setwd("/Users/tianyuyang/Desktop/project2/CSCI6444_Project2/word_frequency/")
+SAT<-VCorpus(DirSource(".", ignore.case=TRUE, mode="text"))
+rem <-removePunctuation(SAT[[1]]$content)
+writeLines(rem,"word_frequency.txt")
+txttfl <-read.tfl("word_frequency.txt")
+txttfl
+txt.spc <- tfl2spc(txttfl)
+txt.spc
+
+# Start word frequency analysis
+# Frequency Spectrum
+summary(txttfl)
+plot(txttfl)
+plot(txttfl, log="x")
+summary(txt.spc)
+plot(txt.spc)
+plot(txt.spc,log="x")
+with(txt.spc, plot(m, Vm, main="Frequency Spectrum"))
+
+#  Estimating V and other quantities at arbitrary sample sizes
+txt.fzm <- lnre("fzm",txt.spc)
+summary(txt.fzm)
+txt.fzm.spc <- lnre.spc(txt.fzm, N(txt.fzm))
+plot(txt.spc, txt.fzm.spc, legend=c("observed", "fZM"))
+
+# Vocabulary growth curves
+sample.sizes <- floor(N(txt.spc)/100) *(1:100)
+txt.vgc <- vgc.interp(txt.spc, sample.sizes)
+head(txt.vgc)
+txt.vgc
+summary(txt.vgc)
+plot(txt.vgc, legend=c("txt-"))
+
+# Interpolation
+txt.bin.vgc <- vgc.interp(txt.spc, N(txt.vgc), m.max=1)
+plot(txt.vgc, txt.bin.vgc,legend=c("observed", "interpolated"))
+```
+
+```{r}
+# Project_2 1.(g)
+# Create text for the first three paragraphs
+firstThree_Paragraph <-NULL
+for(i in 1:3){
+  firstThree_Paragraph <-append(firstThree_Paragraph,paragraphs[i])
+}
+firstThree_Paragraph <-toString(firstThree_Paragraph)
+firstThree_Paragraph <-removeNumPunct(firstThree_Paragraph)
+
+SAT1tokens<-tokens(firstThree_Paragraph)
+
+SATbigrams <- tokens_ngrams(SAT1tokens, n = 2L, skip = 0L, concatenator = "_")
+SATbigrams
+SATtrigrams <- tokens_ngrams(SAT1tokens, n = 3L, skip = 0L, concatenator = "_")
+SATtrigrams
+```
+
+```{r}
+# Project_2 1.(h)
+require(quanteda)
+require(corpustools) 
+require(stringi)
+setwd("/Users/tianyuyang/Desktop/project2/CSCI6444_Project2")
+SAT<-VCorpus(DirSource(".", ignore.case=TRUE, mode="text"))
+SATh <-SAT[2]
+# Corpus Management
+SATlow <- tm_map(SATh, content_transformer(tolower))
+SATcl <- tm_map(SATlow,content_transformer(removeNumPunct))
+myStopwords <- c(stopwords('english'))
+
+# Removing stop words
+SATstop <- tm_map(SATcl, removeWords, myStopwords)
+
+# Text Analysis
+SAT1 <-SATh$content[1]
+SAT1txt <-SAT1[[1]]$content
+SAT1tokens<-tokens(SAT1txt)
+SATdfm <-dfm(SAT1txt)
+
+# Frequency Analysis
+SATdtm <- DocumentTermMatrix(SATstop)
+freq<-colSums(as.matrix(SATdtm))
+
+#corpustools
+#laplace in corpustools
+lapfreq <- laplace(freq, add = 0.5)
+lapfreq
+#resources_path
+resources_path(local_path = getOption("corpustools_resources", NULL))
+#get_stopwords in corpustools
+en_stop = get_stopwords('english')
+en_stop
+
+##stringi
+#SAT1txt
+stri_enc_isascii(SAT1txt)
+#stri_remove_empty
+empSAT<-stri_remove_empty(SAT1txt, na_empty = FALSE)
+empSAT
+#stri_escape_unicode
+escapeSAT <- stri_escape_unicode(SAT1txt)
+escapeSAT
+
+#quanteda
+#Compute the sparsity of a document-feature matrix
+sparsity(SATdfm)
+#Identify the most frequent features in a dfm
+topfeatures(SATdfm, n = 10, decreasing = TRUE, scheme = c("count","docfreq"), groups = NULL)
+#Count syllables in a text
+nsyllable(SAT1tokens[22], syllable_dictionary = quanteda::data_int_syllables,use.names = FALSE)
+```
+
+```{r}
+# Project_2 2
+
+#Find word/phase in the given Directory, return value is {document number, line number, and word index}
+Find_wordphase <-function(wordphase,path){
+  wtmp <-tokens(wordphase)
+  wtmp <- unlist(wtmp,use.names = FALSE)
+  wordNo <-length(wtmp)
+  
+  setwd(path)
+  getwd()
+  SAT<-VCorpus(DirSource(".", ignore.case=TRUE, mode="text"))
+  SAT
+  documentNo <- NULL
+  lineNo <- NULL
+  wordInd <- NULL
+  sentInd <- NULL
+  
+  for(i in 1:length(SAT)){
+    tmp <-SAT[[i]]$content
+    mycorpus <- VCorpus(VectorSource(tmp))
+    corpus_frame <- data.frame(text=unlist(sapply(mycorpus, `[`, "content")), stringsAsFactors=F)
+    sentences <-chunk_into_sentences(corpus_frame)
+    sentences <- removeNumPunct(sentences)
+    
+    for(j in 1:length(sentences)){
+      tmp1 <-tokens(sentences)[j]
+      tmp2 <- unlist(tmp1, use.names=FALSE)
+      for(m in 1:length(tmp2)){
+        count <-0
+        n <-1
+        while(n<=wordNo){
+          if(wtmp[n] == toString(tmp2[m+n-1])){
+            count = count+1
+          }
+          n=n+1
+        }
+        if(count == wordNo){
+          sentInd <-append(sentInd,toString(m))
+        }
+      }
+    }
+    
+    # Remove punctuation and numbers
+    tmp <-removeNumPunct(tmp)
+    for(j in 1:length(tmp)){
+      tmp1 <-tokens(tmp)[j]
+      tmp2 <- unlist(tmp1, use.names=FALSE)
+      for(m in 1:length(tmp2)){
+        count <-0
+        n <-1
+        while(n<=wordNo){
+          if(wtmp[n] == toString(tmp2[m+n-1])){
+            count = count+1
+          }
+          n=n+1
+        }
+        if(count == wordNo){
+          documentNo <-append(documentNo,toString(i))
+          lineNo <-append(lineNo,toString(j))
+          wordInd <-append(wordInd,toString(m))
+        }
+      }
+    }
+    # Divide each document into sentences
+    mycorpus <- VCorpus(VectorSource(tmp))
+    corpus_frame <- data.frame(text=unlist(sapply(mycorpus, `[`, "content")), stringsAsFactors=F)
+    sentences <-chunk_into_sentences(corpus_frame)
+  }
+  return(list(paste("Document Number = ", documentNo),
+              paste("Line Number = ", lineNo),
+              paste("Word Index in line = ", wordInd),
+              paste("Word Index in sentence = ", sentInd)))
+}
+# Testcase 1-1
+Find_wordphase("efficacious","/Users/tianyuyang/Desktop/project2/CSCI6444_Project2/txt/")
+
+# Testcase 1-2
+Find_wordphase("efficacious","/Users/tianyuyang/Desktop/project2/test/")
+
+# Testcase 2-1
+Find_wordphase("materials","/Users/tianyuyang/Desktop/project2/CSCI6444_Project2/txt/")
+
+# Testcase 2-2
+Find_wordphase("materials","/Users/tianyuyang/Desktop/project2/test/")
+
+# Testcase 3-1
+Find_wordphase("a host of","/Users/tianyuyang/Desktop/project2/CSCI6444_Project2/txt/")
+
+# Testcase 3-2
+Find_wordphase("a host of","/Users/tianyuyang/Desktop/project2/test/")
+```
